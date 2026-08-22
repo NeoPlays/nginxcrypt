@@ -13,6 +13,8 @@
 #                                 selective = only publish the CA; add
 #                                             "ssl_verify_client on;" per vhost
 #   NXCT_SERVICE_MTLS_CA          Client CA, default /certs/client-ca.pem
+#   NXCT_SERVICE_TLS_CATCHALL
+#                          false  Reject unknown/absent SNI on 443 at handshake
 #
 # Client certs are issued with mtls.sh.
 #
@@ -124,6 +126,30 @@ if [ "$NXCT_SERVICE_MTLS" != "no" ]; then
     fi
   else
     echo "WARNING: no monitor client cert, domain probes will report false outages" >&2
+  fi
+fi
+
+#
+# NXCT_SERVICE_TLS_CATCHALL - reject unknown SNI before the handshake completes
+#
+
+NXCT_SERVICE_TLS_CATCHALL=$(hardening_bool "$NXCT_SERVICE_TLS_CATCHALL")
+
+if [ "$NXCT_SERVICE_TLS_CATCHALL" = "yes" ]; then
+  # Without this, the first vhost nginx parses becomes the implicit default for
+  # :443, so a scanner with no SNI gets a full handshake and that vhost's cert.
+  # A second default_server on 443 is a fatal config error, so bail if a vhost
+  # already claims one.
+  if grep -rqsE 'listen[^;]*443[^;]*default_server' /etc/nginx/conf.d/; then
+    echo "WARNING: a vhost already claims default_server on 443, skipping TLS catch-all" >&2
+  else
+    echo "Hardening: TLS catch-all enabled (unknown SNI rejected at handshake)"
+    hardening_insert_http "nginxcrypt hardening: tls catch-all" \
+"    server {
+        listen 443 ssl default_server;
+        listen [::]:443 ssl default_server;
+        ssl_reject_handshake on;
+    }"
   fi
 fi
 
