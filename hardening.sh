@@ -15,6 +15,9 @@
 #   NXCT_SERVICE_MTLS_CA          Client CA, default /certs/client-ca.pem
 #   NXCT_SERVICE_TLS_CATCHALL
 #                          false  Reject unknown/absent SNI on 443 at handshake
+#   NXCT_SERVICE_RATELIMIT false  Define a per-IP request zone. true = 10r/s, or
+#                                 give a rate such as 5r/s. Defining the zone
+#                                 enforces nothing until a vhost adds limit_req.
 #
 # Client certs are issued with mtls.sh.
 #
@@ -151,6 +154,31 @@ if [ "$NXCT_SERVICE_TLS_CATCHALL" = "yes" ]; then
         ssl_reject_handshake on;
     }"
   fi
+fi
+
+#
+# NXCT_SERVICE_RATELIMIT - per-IP request zone
+#
+
+NXCT_SERVICE_RATELIMIT="${NXCT_SERVICE_RATELIMIT,,}"
+case "$NXCT_SERVICE_RATELIMIT" in
+  ""|false|no) NXCT_SERVICE_RATELIMIT="" ;;
+  true|yes)    NXCT_SERVICE_RATELIMIT="10r/s" ;;
+esac
+
+if [ -n "$NXCT_SERVICE_RATELIMIT" ]; then
+  if ! [[ "$NXCT_SERVICE_RATELIMIT" =~ ^[0-9]+r/[sm]$ ]]; then
+    echo "ERROR: NXCT_SERVICE_RATELIMIT must be true or a rate like 10r/s: $NXCT_SERVICE_RATELIMIT" >&2
+    exit 3
+  fi
+  echo "Hardening: rate limit zone 'nxct' defined at $NXCT_SERVICE_RATELIMIT per IP"
+  # Only defines the zone. Nothing is limited until a vhost opts in with
+  # "limit_req zone=nxct burst=N nodelay;", so this is safe to enable globally.
+  # 429 rather than the default 503: it is the correct status and gives log
+  # scanners a signal that cannot be confused with an upstream failure.
+  hardening_insert_http "nginxcrypt hardening: rate limit" \
+"    limit_req_zone \$binary_remote_addr zone=nxct:10m rate=$NXCT_SERVICE_RATELIMIT;
+    limit_req_status 429;"
 fi
 
 exec "$ENTRYPOINT" "$@"
