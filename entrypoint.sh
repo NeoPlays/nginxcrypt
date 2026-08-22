@@ -416,6 +416,9 @@ do
   DOMAIN=${!host} PROXY=${!proxy} FRONTEND_PROXY=${!feproxy} BACKEND_PROXY=${!beproxy} envsubst '$PROXY,$DOMAIN,$FRONTEND_PROXY,$BACKEND_PROXY' < /tmp/${TEMPLATE} > "/conf/${FILE_NAME}"
 done
 
+# Apply per-host hardening options that need the generated configs to exist
+[ -f /root/.acme.sh/hardening-post.sh ] && source /root/.acme.sh/hardening-post.sh
+
 # Starting Nginx in daemon mode (and make sure hosts are valid)
 echo "Starting Nginx in daemon mode"
 if ! /usr/sbin/nginx; then
