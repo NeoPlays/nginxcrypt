@@ -29,7 +29,9 @@ services:
   # Build locally with: docker compose build proxy
   proxy:
     container_name: proxy
-    image: neoplays/nginxcrypt:latest
+    # Pinned deliberately: upstream (RockLogicGmbH) publishes to this same Docker
+    # Hub repo, so ":latest" can be replaced by a release outside this fork.
+    image: neoplays/nginxcrypt:v2.0.0
     restart: unless-stopped
     ports:
       - "80:80"
