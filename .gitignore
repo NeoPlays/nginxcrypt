@@ -7,3 +7,6 @@
 
 # OS
 .DS_Store
+
+# Local documentation (not tracked - keeps the fork delta minimal)
+docs/
