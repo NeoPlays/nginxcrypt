@@ -25,4 +25,7 @@ RUN /root/.acme.sh/acme.sh --set-default-ca --server letsencrypt
 
 EXPOSE 80 443
 
-ENTRYPOINT [ "/root/.acme.sh/entrypoint.sh" ]
+COPY hardening.sh /root/.acme.sh/
+
+# Applies opt-in hardening options, then execs entrypoint.sh (bash: no +x needed)
+ENTRYPOINT [ "/bin/bash", "/root/.acme.sh/hardening.sh" ]
