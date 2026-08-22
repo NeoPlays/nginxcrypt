@@ -8,6 +8,13 @@
 # Options:
 #   NXCT_SERVICE_FILELOG   false  Also log to files (for fail2ban etc.)
 #   NXCT_SERVICE_LOGDIR    /logs  Where those files go
+#   NXCT_SERVICE_MTLS      false  false | all | selective
+#                                 all       = require a client cert on every vhost
+#                                 selective = only publish the CA; add
+#                                             "ssl_verify_client on;" per vhost
+#   NXCT_SERVICE_MTLS_CA          Client CA, default /certs/client-ca.pem
+#
+# Client certs are issued with mtls.sh.
 #
 
 ENTRYPOINT="/root/.acme.sh/entrypoint.sh"
@@ -75,6 +82,49 @@ if [ "$NXCT_SERVICE_FILELOG" = "yes" ]; then
 "    access_log $NXCT_SERVICE_LOGDIR/access.log main;
     error_log /var/log/nginx/error.log warn;
     error_log $NXCT_SERVICE_LOGDIR/error.log warn;"
+fi
+
+#
+# NXCT_SERVICE_MTLS - client certificate authentication
+#
+
+NXCT_SERVICE_MTLS="${NXCT_SERVICE_MTLS,,}"
+case "$NXCT_SERVICE_MTLS" in
+  ""|false|no) NXCT_SERVICE_MTLS="no" ;;
+  selective)   NXCT_SERVICE_MTLS="selective" ;;
+  *)           NXCT_SERVICE_MTLS="all" ;;
+esac
+NXCT_SERVICE_MTLS_CA="${NXCT_SERVICE_MTLS_CA:-/certs/client-ca.pem}"
+MTLS_DIR="${NXCT_SERVICE_MTLS_DIR:-/certs/.mtls}"
+
+if [ "$NXCT_SERVICE_MTLS" != "no" ]; then
+  if [ ! -s "$NXCT_SERVICE_MTLS_CA" ]; then
+    echo "ERROR: NXCT_SERVICE_MTLS is on but $NXCT_SERVICE_MTLS_CA is missing - run mtls.sh init" >&2
+    exit 3
+  fi
+  echo "Hardening: mTLS ($NXCT_SERVICE_MTLS), client CA $NXCT_SERVICE_MTLS_CA"
+  # Port 80 is unaffected either way, so the ACME http-01 challenge keeps working.
+  # On its own ssl_client_certificate sends no CertificateRequest, so in selective
+  # mode public vhosts behave exactly as before.
+  MTLS_CONF="    ssl_client_certificate $NXCT_SERVICE_MTLS_CA;"
+  if [ "$NXCT_SERVICE_MTLS" = "all" ]; then
+    MTLS_CONF="$MTLS_CONF
+    ssl_verify_client on;"
+  fi
+  hardening_insert_http "nginxcrypt hardening: mtls" "$MTLS_CONF"
+
+  # upstream_monitor.sh probes vhosts over HTTPS from loopback. Without a client
+  # cert the handshake is rejected, the probe returns 000 and the domain is
+  # alerted as down. curl reads ~/.curlrc, so it can be given one without
+  # touching upstream_monitor.sh.
+  if [ -s "$MTLS_DIR/monitor-cert.pem" ] && [ -s "$MTLS_DIR/monitor-key.pem" ]; then
+    if ! grep -qs "$MTLS_DIR/monitor-cert.pem" /root/.curlrc; then
+      printf 'cert = %s\nkey = %s\n' \
+        "$MTLS_DIR/monitor-cert.pem" "$MTLS_DIR/monitor-key.pem" >> /root/.curlrc
+    fi
+  else
+    echo "WARNING: no monitor client cert, domain probes will report false outages" >&2
+  fi
 fi
 
 exec "$ENTRYPOINT" "$@"
